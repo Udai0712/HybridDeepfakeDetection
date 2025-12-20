@@ -1,0 +1,8 @@
+deepfake_env/
+__pycache__/
+*.pyc
+data/
+checkpoints/
+.ipynb_checkpoints/
+.DS_Store
+
