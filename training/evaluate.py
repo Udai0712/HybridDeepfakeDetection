@@ -25,7 +25,7 @@ def get_device(device_arg):
 # Load model
 # --------------------------------------------------
 def load_model(ckpt_path, device, seq_len):
-    model = HybridModel(seq_len=seq_len).to(device)
+    model = HybridModel(freeze_backbone=False).to(device)
     ckpt = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(ckpt["state_dict"])
     model.eval()

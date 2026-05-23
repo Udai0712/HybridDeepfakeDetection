@@ -1,30 +1,38 @@
 import os
 import tempfile
 import streamlit as st
-
 import torch
+import pandas as pd
 
-from utils.inference import (
-    load_model,
-    infer_video,
-)
-from utils.visualize import draw_predictions
+from utils.inference import load_model, infer_video
+from database import init_db, insert_result, fetch_all_results, delete_all_results
 
 
 # --------------------------------------------------
-# App Config
+# Enterprise UI Styling
 # --------------------------------------------------
 
-st.set_page_config(
-    page_title="Hybrid Deepfake Detection",
-    layout="centered",
-)
+st.set_page_config(page_title="Hybrid Deepfake Detection", layout="wide")
 
-st.title("🎭 Hybrid Deepfake Detection System")
+st.markdown("""
+<style>
+.big-title { font-size:30px !important; font-weight:700; }
+.section-title { font-size:20px !important; font-weight:600; margin-top:20px; }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown('<div class="big-title">🎭 Hybrid Deepfake Detection System</div>', unsafe_allow_html=True)
+
 st.write(
-    "Upload a video to detect whether it is **REAL** or **FAKE** "
-    "using a hybrid Xception + BiLSTM + Attention model."
+    "Enterprise-ready AI system for detecting manipulated videos "
+    "using Xception + BiLSTM + Attention architecture."
 )
+
+# --------------------------------------------------
+# Initialize DB
+# --------------------------------------------------
+
+init_db()
 
 # --------------------------------------------------
 # Settings
@@ -32,7 +40,7 @@ st.write(
 
 CHECKPOINT_PATH = "checkpoints/best_model.pth"
 SEQ_LEN = 16
-FAKE_THRESHOLD = 0.35  # update from threshold_search.py
+FAKE_THRESHOLD = 0.74
 
 DEVICE = (
     "mps" if torch.backends.mps.is_available()
@@ -41,7 +49,7 @@ DEVICE = (
 )
 
 # --------------------------------------------------
-# Load model (cached)
+# Load Model
 # --------------------------------------------------
 
 @st.cache_resource
@@ -52,61 +60,104 @@ def load_cached_model():
         seq_len=SEQ_LEN,
     )
 
-
 model = load_cached_model()
 
-st.success(f"Model loaded successfully on **{DEVICE.upper()}**")
+st.success(f"Model loaded on **{DEVICE.upper()}**")
 
 # --------------------------------------------------
-# File uploader
+# Layout Columns
 # --------------------------------------------------
 
-uploaded_file = st.file_uploader(
-    "Upload a video file",
-    type=["mp4", "mov", "avi"],
-)
+col1, col2 = st.columns([2, 1])
 
 # --------------------------------------------------
-# Inference
+# Upload + Prediction Section
 # --------------------------------------------------
 
-if uploaded_file is not None:
-    st.video(uploaded_file)
+with col1:
+    uploaded_file = st.file_uploader("Upload Video", type=["mp4", "mov", "avi"])
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
-        tmp.write(uploaded_file.read())
-        video_path = tmp.name
+    if uploaded_file is not None:
 
-    with st.spinner("Analyzing video..."):
-        label, fake_prob = infer_video(
-            video_path=video_path,
-            model=model,
-            device=DEVICE,
-            threshold=FAKE_THRESHOLD,
+        st.video(uploaded_file)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+            tmp.write(uploaded_file.read())
+            video_path = tmp.name
+
+        with st.spinner("Analyzing video..."):
+            label, fake_prob = infer_video(
+                video_path=video_path,
+                model=model,
+                device=DEVICE,
+                threshold=FAKE_THRESHOLD,
+            )
+
+        os.remove(video_path)
+
+        prediction_text = "FAKE" if label == 1 else "REAL"
+
+        # Save to DB
+        insert_result(
+            filename=uploaded_file.name,
+            prediction=prediction_text,
+            probability=float(fake_prob),
+            threshold=FAKE_THRESHOLD
         )
 
-    os.remove(video_path)
+        # Display result
+        if prediction_text == "FAKE":
+            st.error("❌ FAKE VIDEO DETECTED")
+        else:
+            st.success("✅ REAL VIDEO")
 
-    # --------------------------------------------------
-    # Results
-    # --------------------------------------------------
+        st.metric("Fake Probability", f"{fake_prob:.2f}")
+        st.progress(int(fake_prob * 100))
 
-    if label == 1:
-        st.error("❌ FAKE VIDEO DETECTED")
-    else:
-        st.success("✅ REAL VIDEO")
+        st.info(
+            f"Decision Threshold: **{FAKE_THRESHOLD}**\n\n"
+            f"Prediction: **{prediction_text}**"
+        )
 
-    st.metric(
-        label="Fake Probability",
-        value=f"{fake_prob:.2f}",
+# --------------------------------------------------
+# Controls Section
+# --------------------------------------------------
+
+with col2:
+    st.markdown('<div class="section-title">⚙ Controls</div>', unsafe_allow_html=True)
+
+    if st.button("🗑 Delete History"):
+        delete_all_results()
+        st.success("Prediction history cleared.")
+
+# --------------------------------------------------
+# Prediction History Table
+# --------------------------------------------------
+
+st.markdown("---")
+st.markdown('<div class="section-title">📜 Prediction History</div>', unsafe_allow_html=True)
+
+rows = fetch_all_results()
+
+if rows:
+    df = pd.DataFrame(rows, columns=[
+        "ID", "Filename", "Prediction",
+        "Probability", "Threshold", "Timestamp"
+    ])
+
+    st.dataframe(df.drop(columns=["ID"]), use_container_width=True)
+
+    # CSV Download
+    csv = df.drop(columns=["ID"]).to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        label="📥 Download History as CSV",
+        data=csv,
+        file_name="prediction_history.csv",
+        mime="text/csv"
     )
-
-    st.progress(int(fake_prob * 100))
-
-    st.info(
-        f"Decision Threshold: **{FAKE_THRESHOLD}**\n\n"
-        f"Prediction: **{'FAKE' if label else 'REAL'}**"
-    )
+else:
+    st.info("No predictions yet.")
 
 # --------------------------------------------------
 # Footer
@@ -115,5 +166,5 @@ if uploaded_file is not None:
 st.markdown("---")
 st.caption(
     "Hybrid Deepfake Detection | Xception + BiLSTM + Attention | "
-    "M.Tech CSE Project"
+    "Enterprise AI System | M.Tech CSE Project"
 )
