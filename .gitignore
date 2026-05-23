@@ -34,3 +34,6 @@ db.sqlite3
 
 # VS Code temp
 tempCodeRunnerFile.py
+
+*.mp4
+*.db
